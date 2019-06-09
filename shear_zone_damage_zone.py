@@ -71,9 +71,9 @@ from landlab.components import (LinearDiffuser, #Hillslopes
 
 xmax = 150               # length of the domain [meters]
 ymax = 100               # width of the domain [meters]
-dxy = 1                 # pixel size as the length of one side [meters]
-ncols = int(3*xmax/dxy) # number of columns, tripled for looped boundaries
-nrows = int(ymax/dxy)   # number of rows
+dxy = 1                  # pixel size as the length of one side [meters]
+ncols = int(3*xmax/dxy)  # number of columns, tripled for looped boundaries
+nrows = int(ymax/dxy)    # number of rows
 
 # Build the landlab grid #
 rmg = RasterModelGrid((nrows,ncols),dxy) # build a landlab grid of nrows x ncols

@@ -72,9 +72,9 @@ from landlab.components import (LinearDiffuser, #Hillslopes
 
 # Set Domain size and parameters #
 
-xmax = 600                  # length of the domain [meters]
-ymax = 250                  # width of the domain [meters]
-dxy = 5                     # pixel size as the length of one side [meters]
+xmax = 200                  # length of the domain [meters]
+ymax = 100                  # width of the domain [meters]
+dxy = 1                     # pixel size as the length of one side [meters]
 loopBuff = 0.2;             # added buffer to loop around kdc
 ncols = int(xmax*(1+2*loopBuff)/dxy) # number of columns, tripled for looped boundaries kdc
 # ncols = int(3*xmax/dxy)   # number of columns, tripled for looped boundaries kdc
@@ -121,7 +121,7 @@ spatially_variable_rock_id[(rmg.y_of_node>2*ymax/5) & (rmg.y_of_node<3*ymax/5)] 
 # grow the topography up (this is clearly dumb)
 z += 1.
 dz_ad = 0.
-lith.run_one_step(dz_advection = dz_ad, rock_id=spatially_variable_rock_id)
+lith.run_one_step(dz_advection = dz_ad, rock_id = spatially_variable_rock_id)
 imshow_grid(rmg, 'rock_type__id', cmap='viridis', vmin=0, vmax=3)
 
 #  since we will not update z after this, the erodability parameters of the rock should not change
@@ -140,10 +140,10 @@ n = 1                   # exponent on river slope [non dimensional]
 # Tectonic variables #
 uplift_rate = 1.8       # uplft rate of the landscape [meters per kiloyear]
 vmax        = 6.0       # maximum off fault deformation rate [meters per kiloyear]
-v_star      = 150.      # e-folding lengthscale for the deformation profile [meters]
+v_star      = 50.      # e-folding lengthscale for the deformation profile [meters]
 
 # Model miscellaneous variables ##
-total_time  = 5000      # Maximum time the simulation can run for [kyr]
+total_time  = 8000      # Maximum time the simulation can run for [kyr]
 shear_start = 2000      # Time to start the off-fault deformation [kyr]
 dt          = 1.0       #time_step of the for loop [kyr]
 dt_during_shear = 0.05  #time steps during shear
@@ -159,20 +159,31 @@ num_frames  = ((total_time-shear_start)/dt_during_shear)/plot_num +1
 ## Fourth, the fun part, set up the off-fault deformation profile #############
 ################################################################################
 
-# Velocity profile. Here we use an exponential function to describe the lateral
-# deformation with distance from the fault.
+# define the position of the fault
 fault_pos = nrows/2
-v_profile = np.heaviside(np.arange(0.,nrows)-fault_pos,vmax)
-#v_profile = vmax*np.exp(-np.arange(0.,nrows)/(v_star/dxy))
 
-# because the grid is discretized into pixels, we need to count how much
+# decide what kind of fault to make options include heavyside, exponential decay (half shear zone), arctan
+faultOpt  = 'heaviside'
+yLocation = np.arange(0.,nrows)
+faultStretch = 1/5 # more distributed deformation (>1.) vs localize def (<<1)
+
+# different fault setups
+if      faultOpt == 'arctan':
+    profile = np.arctan(((yLocation-fault_pos)/nrows - 0.5)*np.pi/faultStretch) # deal with magic number
+elif    faultOpt == 'heaviside':
+    profile = np.heaviside(yLocation-fault_pos,1)
+elif    faultOpt == 'exp':
+    profile = np.exp(-yLocation/(v_star/dxy))
+
+
+# make velocity profile and because the grid is discretized into pixels, we need to count how much
 # deformation has occurred over a timestep and move a pixel after the
 # accumulated deformation is larger than than the pixel length
-accum_disp = float(dxy)*np.heaviside(np.arange(0.,nrows)-fault_pos,1)
-#accum_disp = float(dxy)*np.exp(-np.arange(0.,nrows)/(v_star/dxy))
+v_profile = profile * vmax
+accum_disp= profile * float(dxy)
 
 # This is an array for counting how many pixels need to be moved
-nshift = np.zeros(np.size(np.arange(0.,nrows)))
+nshift = np.zeros(np.size(yLocation))
 n_buff=0 # optional extra buffer zone incase you only want to move a subset.
 
 
@@ -224,14 +235,6 @@ while (current_time <= total_time):
     rmg['node']['topographic__elevation'][(rmg.node_x>=e2)] = (
       rmg['node']['topographic__elevation'][(rmg.node_x>=e1) &
       (rmg.node_x<(2*e1))])
-
-    # rmg['node']['topographic__elevation'][(rmg.node_x<ncols*dxy/3)] = (
-    #  rmg['node']['topographic__elevation'][(rmg.node_x>=ncols*dxy/3) &
-    #  (rmg.node_x<2*ncols*dxy/3)])
-    #
-    # rmg['node']['topographic__elevation'][(rmg.node_x>=2*ncols*dxy/3)] = (
-    #   rmg['node']['topographic__elevation'][(rmg.node_x>=ncols*dxy/3) &
-    #   (rmg.node_x<2*ncols*dxy/3)])
 
     ## Tectonic off-fault deformation ##
 
@@ -343,7 +346,9 @@ print('For loop complete')
 
 
 imshow_grid(rmg,'topographic__elevation',show_elements=False)
-plt.xlim((rmg.shape[1]*rmg.dx/3,rmg.shape[1]*rmg.dx*2/3))
+plotEdge1 = rmg.shape[1]*rmg.dx * loopBuff/(2*loopBuff+1)
+plotEdge2 = rmg.shape[1]*rmg.dx * (1 - loopBuff/(2*loopBuff+1))
+plt.xlim((plotEdge1,plotEdge2))
 plt.show()
 plt.clf
 
