@@ -6,7 +6,7 @@
 
 """
 Created on Tue Jun 21 15:14:15 2016
-
+UC
 @author: harrison
 
 Code used to perform the research described in Gray et al. (2017).
@@ -44,6 +44,10 @@ This code adds a fault damage zone component to the model
 @author: Kelian Dascher-Cousineau
 Limited the size of the buffer to improve computation time
 
+EDIT: July 23
+@author: Kelina Dasher-Cousineau
+Adding
+
 """
 
 ## First, we initialize the code by importing python libraries. ###############
@@ -63,19 +67,27 @@ from landlab.components import (LinearDiffuser, #Hillslopes
                                 DepressionFinderAndRouter, # lake filling
                                 Lithology) # Diffirent lithologies (damage zone)
 
+from landlab.io.esri_ascii import write_esri_ascii
+from landlab.testing.tools import cdtemp
 
+from tqdm import tqdm
 
+from shutil import copyfile
+import datetime
+import os
 
 ################################################################################
 ## Second, let's build the landlab grid we will build our landscape on. #######
 ################################################################################
 
-# Set Domain size and parameters #
+SAVE_OUTPUT = 1 # 0: dont save, 1: save gif, 2: save gif and ascii files
 
-xmax = 600                  # length of the domain [meters]
-ymax = 250                  # width of the domain [meters]
-dxy = 5                     # pixel size as the length of one side [meters]
-loopBuff = 0.2;             # added buffer to loop around kdc
+# Set Domain size and parameters 
+
+xmax = 6000                  # length of the domain [meters]
+ymax = 4000                  # width of the domain [meters]
+dxy = 20                     # pixel size as the length of one side [meters]
+loopBuff = 0.;             # added buffer to loop around kdc
 ncols = int(xmax*(1+2*loopBuff)/dxy) # number of columns, tripled for looped boundaries kdc
 # ncols = int(3*xmax/dxy)   # number of columns, tripled for looped boundaries kdc
 nrows = int(ymax/dxy)       # number of rows
@@ -102,12 +114,12 @@ rmg['node']['topographic__elevation'] += (rmg.node_y*0.1 +
 z = rmg['node']['topographic__elevation']
 
 # The variable lithology is done the only way I know how (most likely not the best way)
-attrs = {'K_sp':  {1: 0.05,
-                   2: 0.05},
-         'D':     {1: 0.02,
-                   2: 0.02}}
+attrs = {'K_sp':  {1: 0.005, # damage zone
+                   2: 0.015},
+         'D':     {1: 0.04,
+                   2: 0.04}}
 # Dummy thickness
-thickness = [1,1]
+thickness = [1.,1.]
 
 # instantiate the Lithology component
 lith = Lithology(rmg, thickness, [1,2], attrs)
@@ -116,16 +128,16 @@ lith = Lithology(rmg, thickness, [1,2], attrs)
 spatially_variable_rock_id = rmg.ones('node')
 
 # Comment/Uncomment below to introduce a damage zone kdc!
-spatially_variable_rock_id[(rmg.y_of_node>2*ymax/5) & (rmg.y_of_node<3*ymax/5)] = 2
+spatially_variable_rock_id[(rmg.y_of_node>2*ymax/5) & (rmg.y_of_node<2*ymax/5)] = 2
 
 # grow the topography up (this is clearly dumb)
 z += 1.
 dz_ad = 0.
 lith.run_one_step(dz_advection = dz_ad, rock_id=spatially_variable_rock_id)
-imshow_grid(rmg, 'rock_type__id', cmap='viridis', vmin=0, vmax=3)
+# imshow_grid(rmg, 'rock_type__id', cmap='viridis', vmin=0, vmax=3)
 
-#  since we will not update z after this, the erodability parameters of the rock should not change
-#  ...at least that is the idea
+#  since we will not update z after this, the erodability parameters of the 
+#  rock should not change
 
 ################################################################################
 ## Third, we now set parameters to control and build our landscape ############
@@ -143,15 +155,18 @@ vmax        = 6.0       # maximum off fault deformation rate [meters per kiloyea
 v_star      = 150.      # e-folding lengthscale for the deformation profile [meters]
 
 # Model miscellaneous variables ##
-total_time  = 5000      # Maximum time the simulation can run for [kyr]
+total_time  = 2500      # Maximum time the simulation can run for [kyr]
 shear_start = 2000      # Time to start the off-fault deformation [kyr]
 dt          = 1.0       #time_step of the for loop [kyr]
-dt_during_shear = 0.05  #time steps during shear
+dt_during_shear = 0.1   #time steps during shear
 
+plot_dt     = 0.5       # period of time in between each plot (kyrs)
+calculate_BR= False     # calculate the metric BR used in the main paper
+
+# not to be set by user #
 current_time= 0         # time tracking variable [kyr]
 i           = 0         # iteration tracker [integer]
-plot_num    = 200       # number of iterations to run before each new plot
-calculate_BR= False     # calculate the metric BR used in the main paper
+plot_num    = np.ceil(plot_dt/dt_during_shear) # number of iterations to run before each new plot
 num_frames  = ((total_time-shear_start)/dt_during_shear)/plot_num +1
 
 
@@ -168,8 +183,10 @@ v_profile = np.heaviside(np.arange(0.,nrows)-fault_pos,vmax)
 # because the grid is discretized into pixels, we need to count how much
 # deformation has occurred over a timestep and move a pixel after the
 # accumulated deformation is larger than than the pixel length
+
 accum_disp = float(dxy)*np.heaviside(np.arange(0.,nrows)-fault_pos,1)
 #accum_disp = float(dxy)*np.exp(-np.arange(0.,nrows)/(v_star/dxy))
+
 
 # This is an array for counting how many pixels need to be moved
 nshift = np.zeros(np.size(np.arange(0.,nrows)))
@@ -187,7 +204,6 @@ lin_diffuse = LinearDiffuser(rmg, linear_diffusivity='D')           #linear diff
 fill = DepressionFinderAndRouter(rmg)                               #lake filling algorithm
 
 nts = int(num_frames)
-print(nts)
 ds = xr.Dataset(data_vars={'topographic__elevation' : (('time', 'y', 'x'),                      # tuple of dimensions
                                                        np.empty((nts, rmg.shape[0], rmg.shape[1])), # n-d array of data
                                                       {'units' : 'meters'})},                       # dictionary with data attributes
@@ -204,12 +220,12 @@ ds = xr.Dataset(data_vars={'topographic__elevation' : (('time', 'y', 'x'),      
 out_fields = ['topographic__elevation']
 plotCounter = 0
 
+#%%
 # Now that all parameters and landlab components are set, run the loop #######
 
-print('start for loop')
-
+pbar = tqdm(total=(total_time-shear_start), position=0, leave=True)
 while (current_time <= total_time):
-
+   
     ## Looped boundary conditions ##
 
     # Because the landlab flow router isn't currently set up to use looped
@@ -239,7 +255,7 @@ while (current_time <= total_time):
     # lateral velocity profile. This is done by taking the landlab elevations
 
     if (current_time>shear_start):
-
+      pbar.update(dt)
       dt = dt_during_shear # First set a lower timestep to keep it stable
 
       # Take the landlab grid elevations and reshape into a box nrows x ncols
@@ -324,35 +340,55 @@ while (current_time <= total_time):
 
     if i % plot_num == 0 and current_time>shear_start:
 
-      # Use landlab plotting function to plot the landscape
-      #imshow_grid(rmg,'topographic__elevation',show_elements=False)
-      #plt.xlim((rmg.shape[1]*rmg.dx/3,rmg.shape[1]*rmg.dx*2/3))
-      #plt.show()
-      #plt.clf
-      print('Current time = ' + str(current_time)) # show current time
+#       Use landlab plotting function to plot the landscape
+#      plt.clf
+#      plt.figure()
+#      imshow_grid(rmg,'topographic__elevation',show_elements=False)
+#      plt.xlim((rmg.shape[1]*rmg.dx/3,rmg.shape[1]*rmg.dx*2/3))
+#      plt.show()
+      
+      #print('Current time = ' + str(current_time)) # show current time
       for of in out_fields:
         ds[of][plotCounter,:,:] = rmg['node'][of].reshape(rmg.shape)
+        
       plotCounter += 1
+      
     current_time += dt # update time tracker
-
-
     i += 1 # update iteration variable
 
-print(plotCounter)
-print('For loop complete')
+pbar.close()
 
-
-imshow_grid(rmg,'topographic__elevation',show_elements=False)
-plt.xlim((rmg.shape[1]*rmg.dx/3,rmg.shape[1]*rmg.dx*2/3))
-plt.show()
-plt.clf
+#imshow_grid(rmg,'topographic__elevation',show_elements=False)
+#plt.xlim((rmg.shape[1]*rmg.dx/3,rmg.shape[1]*rmg.dx*2/3))
+#plt.show()
+#plt.clf
 
 ################################################################################
 ## plot the output into a gif
 hvds_topo = hv.Dataset(ds.topographic__elevation)
-get_ipython().run_line_magic('opts', "Image style(interpolation='bilinear', cmap='viridis') plot[colorbar=True]")
-get_ipython().run_line_magic('output', 'size=700')
+try:
+    get_ipython().run_line_magic('opts', "Image style(interpolation='bilinear', cmap='viridis') plot[colorbar=True]")
+    get_ipython().run_line_magic('output', 'size=700')
+except:
+    print("Cannot plot gif because user is not using ipython")
 topo = hvds_topo.to(hv.Image, ['x', 'y'])
 # topo
+#%%
+#hv.output(dpi=100, size=150)
+#hv.save(topo, 'topo.gif', fps=30)
+#
+#if SAVE_OUTPUT > 0:
+#    d = datetime.datetime.today()
+#    newPath = "./model_output_" + d.strftime("%Y_%B_%d_%H_%M")
+#    os.mkfir(newPath)
+#    hv.save(topo, newPath + '/topo.gif', fps=30)
 
-hv.save(topo,'temp_output.gif')
+if SAVE_OUTPUT == 2:
+    currFile = os.path.basename(__file__)
+    copyfile(currFile, newPath + "/" + currFile + "_archive")
+    files = write_esri_ascii(newPath + '/output_grids.asc', rmg)
+
+
+
+# save what is like a DEM:
+
