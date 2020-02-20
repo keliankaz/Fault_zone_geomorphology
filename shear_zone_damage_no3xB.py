@@ -50,6 +50,7 @@ import numpy as np # numerical python
 import xarray as xr
 import matplotlib.pyplot as plt # matplotlib plotting functions
 
+
 from landlab import RasterModelGrid #landlab raster grid
 from landlab.plot import imshow_grid #landlab plotting function
 import holoviews as hv
@@ -65,38 +66,45 @@ from landlab.components import (LinearDiffuser, #Hillslopes
                                 DepressionFinderAndRouter, # lake filling
                                 Lithology) # Diffirent lithologies (damage zone)
 
+from landlab.testing.tools import cdtemp
+from landlab.io.esri_ascii import write_esri_ascii # export to ascii (to analyse in matlab)
+
+
+
 # In[]
 ################################################################################
 ################# Second, let's define model inputs. ###########################
 ################################################################################
 
 def default_landscape_parameters():
-    mdl_dict ={'model_domain':{'xmax':1500.,                # length of the domain [meters]
-                               'ymax':1000.,                  # width of the domain [meters]
-                               'loopBuff':0.5,                # added buffer to loop around kdc
-                               'Nxy':100},                    # number of nodes in the y direction
-               'landscape':  {'m':0.5,                      # exponent on drainage area [non dimensional]
-                               'n':1,                         # exponent on river slope [non dimensional]
-                               'Do':0.05,                     # Hillslope linear diffusivity [meters sqared per kiloyear]
-                               'Dm':0.1,                     # Fault Hillslope linear diffusivity [meters sqared per kiloyear]
-                               'ko':0.001,                     # value for the "erodability" of the landscape bedrock [kyr^-1]
-                               'km':0.02},                    # Fault value for the "erodability" of the landscape bedrock [kyr^-1]
-               'tectonics':  {'uplift_rate':1.8,              # uplft rate of the landscape [meters per kiloyear]
-                               'boundaries':[False,False,False,False]}, # boundaries (closed: true or false) - left, top, right, bottom            
+    mdl_dict ={'model_domain':{'xmax':          1200.,          # length of the domain [meters]
+                               'ymax':          1000.,            # width of the domain [meters]
+                               'loopBuff':      0.5,              # added buffer to loop around kdc
+                               'Nxy':           100},             # number of nodes in the y direction
+               'landscape':  {'m':              0.5,            # exponent on drainage area [non dimensional]
+                               'n':             1,                # exponent on river slope [non dimensional]
+                               'Do':            0.1,              # Hillslope linear diffusivity [meters sqared per kiloyear]
+                               'Dm':            0.1,              # Fault Hillslope linear diffusivity [meters sqared per kiloyear]
+                               'ko':            0.005,            # value for the "erodability" of the landscape bedrock [kyr^-1]
+                               'km':            0.02},            # Fault value for the "erodability" of the landscape bedrock [kyr^-1]
+               'tectonics':  {'uplift_rate':    1.8,              # uplft rate of the landscape [meters per kiloyear]
+                               'boundaries':    [False,True,False,False],# boundaries (closed: true or false) - left, top, right, bottom            
+                               'track_uplift':  False},         # display the grown of the landscape in the initial preperation of the model 
                
-               'duration':   {'total_time': 3000,            # Maximum time the simulation can run for [kyr]
-                               'shear_start': 2000,           # Time to start the off-fault deformation [kyr]
-                               'dt': 1.0,                     # time_step of the for loop [kyr]
-                               'dt_during_shear': 0.8},       # time steps during shear    
-               'fault_opt':  {'width':100.,                  # width of the damage zone (meters)
-                               'fault_pos': 'midway',         # fault location in the y direction (meters) - or None, or otherwise specify y coordinate
-                               'slip_profile':'arctan',       # shape of the desired slip function (opt: arctan, boxcar, exp, none)
-                               'localization':1,              # degree of localization 1 -> same width as the damage zone, <<1 -> localized fault
-                               'damage_prof':'exp',           # shape of the desired damage pattern (opt: exp, boxcar, none)    
-                               'vmax':6.0,                    # maximum off fault deformation rate [meters per kiloyear]
-                               'v_star':50.},                 # e-folding lengthscale for the deformation profile [meters],         
-               'save_opt':     {'save_out': 'temp',            # save output or not (opt: True, 'temp', False)
-                               'save_format': 'Default'}}     # alt: a dict with 'Directory' and 'Filename' keys
+               'duration':   {'total_time':     3000,             # Maximum time the simulation can run for [kyr]
+                               'shear_start':   2000,             # Time to start the off-fault deformation [kyr]
+                               'dt':            1.0,              # time_step of the for loop [kyr]
+                               'dt_during_shear':0.8},            # time steps during shear    
+               'fault_opt':  {'width':          100.,           # width of the damage zone (meters)
+                               'fault_pos':     'midway',         # fault location in the y direction (meters) - or None, or otherwise specify y coordinate
+                               'slip_profile':  'arctan',         # shape of the desired slip function (opt: arctan, boxcar, exp, none)
+                               'localization':  1,                # degree of localization 1 -> same width as the damage zone, <<1 -> localized fault
+                               'damage_prof':   'exp',            # shape of the desired damage pattern (opt: exp, boxcar, heaviside_up, heaviside_down, none)    
+                               'vmax':          6.0,              # maximum off fault deformation rate [meters per kiloyear]
+                               'v_star':        50.},             # e-folding lengthscale for the deformation profile [meters],         
+               'save_opt':   {'save_out':       'temp',           # save output or not (opt: True, 'temp', False)
+                               'save_format':   'Default',
+                               'save_ascii':    False}}         # alt: a dict with 'Directory' and 'Filename' keys
     
     return mdl_dict
 
@@ -220,12 +228,19 @@ def run_model(mdl_input = None):
             
             # 2D profiles
             if damage_opt == 'boxcar':
-                damage_func = lambda x: np.heaviside(x-fault_pos-width,1) * \
+                damage_func = lambda x: np.heaviside(x-fault_pos-width,1) - \
                                         np.heaviside(x-fault_pos+width,1)
+                                        
+            if damage_opt == 'heaviside_up':
+                damage_func = lambda x: np.abs(np.heaviside(x-fault_pos,1)-1)
+                
+            if damage_opt == 'heaviside_down':
+                damage_func = lambda x: np.heaviside(x-fault_pos,1)
             
             if damage_opt == 'exp': 
                 damage_func = lambda x: (width/(abs(x-fault_pos)+width))  # NEED TO DEFINE BUFF -> similar to c value in aftershocks
             
+            # the 2D profiles are then added to the background values for the landscape paramters
             def mk_dict(rmg,damage_func,ao,am):
                 lith_ary = ao + (am-ao) * damage_func(rmg.node_y)
                 damage_dict = dict(zip(rmg.node_y,lith_ary))
@@ -242,7 +257,7 @@ def run_model(mdl_input = None):
             self.rmg['node']['topographic__elevation'] += 1.
             dz_ad = 0.
             lith.run_one_step(dz_advection = dz_ad, rock_id = self.rmg.node_y)
-            imshow_grid(self.rmg, 'K_sp', cmap='viridis', vmin=ko, vmax=km)
+            #imshow_grid(self.rmg, 'K_sp', cmap='viridis', vmin=ko, vmax=km)
             return lith
         
     # define the position of the fault
@@ -268,28 +283,31 @@ def run_model(mdl_input = None):
     ## Next, we instantiate an object to store the model output #####
     ################################################################################
     nts = int(num_frames)
-    ds = xr.Dataset(data_vars={'topographic__elevation' : (('time', 'y', 'x'),                      # tuple of dimensions
-                                                           np.empty((nts, rmg.shape[0], rmg.shape[1])), # n-d array of data
-                                                          {'units' : 'meters'})},                       # dictionary with data attributes
-                    coords={'x': (('x'),                                                            # tuple of dimensions
-                                  rmg.x_of_node.reshape(rmg.shape)[0,:],                                # 1-d array of coordinate data
-                                  {'units' : 'meters'}),                                                # dictionary with data attributes
-                            'y': (('y'),
-                                  rmg.y_of_node.reshape(rmg.shape)[:, 1],
-                                  {'units' : 'meters'}),
-                            'time': (('time'),
-                                     duration['dt']*np.arange(nts)/1e6,
-                                     {'units': 'millions of years since model start',
-                                      'standard_name' : 'time'})})
-    out_fields = ['topographic__elevation']
+    if not save_opt['save_out'] == False:
+        ds = xr.Dataset(data_vars={'topographic__elevation' : (('time', 'y', 'x'),                      # tuple of dimensions
+                                                               np.empty((nts, rmg.shape[0], rmg.shape[1])), # n-d array of data
+                                                              {'units' : 'meters'})},                       # dictionary with data attributes
+                        coords={'x': (('x'),                                                            # tuple of dimensions
+                                      rmg.x_of_node.reshape(rmg.shape)[0,:],                                # 1-d array of coordinate data
+                                      {'units' : 'meters'}),                                                # dictionary with data attributes
+                                'y': (('y'),
+                                      rmg.y_of_node.reshape(rmg.shape)[:, 1],
+                                      {'units' : 'meters'}),
+                                'time': (('time'),
+                                         duration['dt']*np.arange(nts)/1e6,
+                                         {'units': 'millions of years since model start',
+                                          'standard_name' : 'time'})})
+        out_fields = ['topographic__elevation']
     plotCounter = 0
     
     ################################################################################
     # Now that all parameters and landlab components are set, run the loop #######
     ################################################################################
     
-    dt = duration['dt']
-    print('start for loop')
+    dt          = duration['dt'] # define the timestep
+    mean_elev   = []
+    time_array  = []
+    print('Growing landscape towards steady state...')
     while (current_time <= duration['total_time']):
     
         ## Looped boundary conditions ##
@@ -311,17 +329,17 @@ def run_model(mdl_input = None):
     
         # To simulate off fault lateral displacement/deformation, we apply a
         # lateral velocity profile. This is done by taking the landlab elevations
-    
+        # and shifting their coordinates.
         if (current_time>duration['shear_start']):
     
-          dt = duration['dt_during_shear'] # First set a lower timestep to keep it stable
+          dt        = duration['dt_during_shear'] # First set a lower timestep to keep it stable
     
           # Take the landlab grid elevations and reshape into a box nrows x ncols
-          elev = rmg['node'][ 'topographic__elevation']
-          elev_box = np.reshape(elev, [nrows,ncols])
+          elev      = rmg['node'][ 'topographic__elevation']
+          elev_box  = np.reshape(elev, [nrows,ncols])
     
           # Calculate the offset that has accumulated over a timestep
-          accum_disp += v_profile*dt;
+          accum_disp+= v_profile*dt;
     
           # now scan up the landscape row by row looking for offset
           for r in range(nrows):
@@ -351,8 +369,11 @@ def run_model(mdl_input = None):
           # Finally, reshape the elevation box into an array and feed to landlab
           elev_new = np.reshape(elev_box, nrows*ncols)
           rmg['node']['topographic__elevation'] = elev_new
-    
-    
+          
+        # record the evolution of the mean elevation
+        mean_elev.append(np.mean(rmg['node']['topographic__elevation']))  
+        time_array.append(current_time);  
+
         ## Landscape Evolution ##
     
         # Now that we have performed the tectonic deformation, lets apply our
@@ -360,7 +381,7 @@ def run_model(mdl_input = None):
     
         # Uplift the landscape
         rmg['node']['topographic__elevation'][rmg.core_nodes] += tectonics['uplift_rate']*dt
-    
+        
         # set the lower boundary as fixed elevation
         #rmg['node']['topographic__elevation'][rmg.node_y==0] = 0
         #rmg['node']['topographic__elevation'][rmg.node_y==max(rmg.node_y)] = 0
@@ -373,71 +394,62 @@ def run_model(mdl_input = None):
         DepressionFinderAndRouter.map_depressions(fill) # fill lakes
         sp.run_one_step(dt) # fastscape stream power eroder
     
-    
-        ## Calculate the geomorphic metric ##
-    
-        # In the paper, we use a geomorphic metric, BR, to quantify the
-        # reorientation of the channels as time goes on. The code to calculate this
-        # value is below but turned off as it can slow the model. Set the
-        # 'calculate_BR' variable to 'True' if you want to calculate it.
-    
-#        if calculate_BR:
-    
-#          aspects = rmg.calc_aspect_at_node() # measure pixel aspect
-#    
-#          # classify and count the number of pixels with certain directions
-#          asp_0_45    = float(np.logical_and(aspects>=0,aspects<=45).sum())
-#          asp_45_135  = float(np.logical_and(aspects>45,aspects<=135).sum())
-#          asp_135_225 = float(np.logical_and(aspects>135,aspects<=225).sum())
-#          asp_225_315 = float(np.logical_and(aspects>225,aspects<=315).sum())
-#          asp_315_360 = float(np.logical_and(aspects>315,aspects<=360).sum())
-#    
-#          # Calculate BR from Gray et al. (2017)
-#          BR = (asp_0_45 + asp_315_360 + asp_135_225)/(asp_45_135 + asp_225_315)
-    
         ## Plotting ##
-    
+        # plot output at each [plot_num] iteration once we start lateral advection
         if i % plot_num == 0 and current_time>duration['shear_start']:
           print('Current time = ' + str(current_time)) # show current time
-          for of in out_fields:
-            ds[of][plotCounter,:,:] = rmg['node'][of].reshape(rmg.shape)
+          if not save_opt['save_out'] == False:
+              for of in out_fields:
+                ds[of][plotCounter,:,:] = rmg['node'][of].reshape(rmg.shape)
           plotCounter += 1
         current_time += dt # update time tracker
-    
-    
         i += 1 # update iteration variable
-    
-    print(plotCounter)
+    print('number of frames:', plotCounter)
     print('For loop complete')
     
-    plt.figure()
-    imshow_grid(rmg,'topographic__elevation',show_elements=False)
-    # tweek edges of domain so that they match the buffer kdc
-    plt.xlim((e1,e2))
-    plt.show()
-    plt.clf
+#    plt.figure()
+#    imshow_grid(rmg,'topographic__elevation',show_elements=False)
+#    # tweek edges of domain so that they match the buffer kdc
+#    plt.xlim((e1,e2))
+#    plt.show()
+#    plt.clf
+
+
     
-    ################################################################################
+    ###########################################################################
+    ## plot the evolution of the mean elevation of the model:
+    if tectonics['track_uplift']:
+        plt.figure()
+        plt.plot(time_array,mean_elev, label='Mean elevation')
+        plt.axvline(duration['shear_start'],color='r',label='Start lateral advection')
+        plt.xlabel('Iteration number')
+        plt.ylabel('Mean elevation')
+        plt.legend()
+        plt.show()
+        
+    
+    
+    
     ## plot the output into a gif
-    hvds_topo = hv.Dataset(ds.topographic__elevation)
     get_ipython().run_line_magic('opts', "Image style(interpolation='bilinear', cmap='viridis') plot[colorbar=True]")
     get_ipython().run_line_magic('output', 'size=100')
-    topo = hvds_topo.to(hv.Image, ['x', 'y'])
-    topo.opts(colorbar=True, fig_size=200, xlim=(e1, e2))
+    if not save_opt['save_out'] == False:
+        hvds_topo = hv.Dataset(ds.topographic__elevation)
+        topo = hvds_topo.to(hv.Image, ['x', 'y'])
+        topo.opts(colorbar=True, fig_size=200, xlim=(e1, e2))
+        if save_opt['save_out'] == True:
+            os.mkdir(dirname)
+            hv.save(topo, os.path.join(dirname,file_name + '.gif'))
+            dill.dump_session(os.path.join(dirname,file_name+'.pkl'))
+            # and to load the session again:
+            # dill.load_session(filename)
+        if save_opt['save_ascii'] == True:
+            write_esri_ascii(os.path.join(dirname,file_name + '.asc'), rmg,names='topographic__elevation')
+        
+        if save_opt['save_out'] == 'temp':          
+            hv.save(topo,'temp_output.gif')
     
-    # topo
-    
-    if save_opt['save_out'] == True:
-        os.mkdir(dirname)
-        hv.save(topo, os.path.join(dirname,file_name + '.gif'))
-        dill.dump_session(os.path.join(dirname,file_name+'.pkl'))
-        # and to load the session again:
-        # dill.load_session(filename)
-        
-        
-        
-    if save_opt['save_out'] == 'temp':  
-        hv.save(topo,'temp_output.gif')
+    return rmg 
     
 
 
@@ -453,42 +465,89 @@ def run_model(mdl_input = None):
         
 # with the code in the format you can easily play around with different input stuctures:
 
-# default vals for reference
-#'ko':0.1,                      # value for the "erodability" of the landscape bedrock [kyr^-1]
-#'km':0.2}, 
-kmAry = [0.005,    0.03,   0.1]
-locAry= [1/10**10, 1/10**2,1/10**0] 
-defaultDict = default_landscape_parameters()       
-        
-for iDamage in kmAry:
-    for iDef in locAry:
-        new_landscape_parameter = defaultDict
-        new_landscape_parameter['landscape']['km'] = iDamage
-        new_landscape_parameter['fault_opt']['localization'] = iDef
-        run_model(mdl_input = new_landscape_parameter)
+#kmAry = [0.005,    0.03,   0.1]
+#locAry= [1/10**10, 1/10**2,1/10] 
+#defaultDict = default_landscape_parameters()     
+#defaultDict['duration']['shear_start'] = 4000
+#defaultDict['duration']['total_time'] = 4500
+#defaultDict['model_domain']['Nxy'] = 130
+#defaultDict['save_opt']['save_out'] = False
+#
+#fig, ax = plt.subplots(len(kmAry),len(kmAry),figsize=[6,4.5])
+#rmg_arr = []
+## Illuminate the scene from the northwest
+#plotCount = 1
+#for idxDam, iDamage in enumerate(kmAry):
+#    for idxDef, iDef in enumerate(locAry):
+#        new_landscape_parameter = defaultDict
+#        new_landscape_parameter['landscape']['km'] = iDamage
+#        new_landscape_parameter['fault_opt']['localization'] = iDef
+#        rmg = run_model(mdl_input = new_landscape_parameter)
+#        topo_elev = rmg.node_vector_to_raster(rmg['node']['topographic__elevation'], True)
+#        rmg_arr.append(rmg)
+#        ax[idxDam,idxDef].imshow(topo_elev)
+#        Nx = topo_elev.shape[1]
+#        buff = new_landscape_parameter['model_domain']['loopBuff']
+#        Nbuff = Nx*buff/(1+2*buff)
+#        ax[idxDam,idxDef,].set_xlim(Nbuff, Nx - Nbuff)
+#        if idxDam == 0:
+#            tle = '${localization:.2e}$'.format(localization = iDef)
+#            ax[idxDam,idxDef].title.set_text(tle)
+#            
+#        if idxDef == 0:
+#            tle = '${damage:.2e}$'.format(damage = iDamage)
+#            ax[idxDam,idxDef].set_ylabel(tle)
+#
+#for iax in ax.flat:
+#    iax.set_xticks([])
+#    iax.set_yticks([])
+#
+#
+#fig
+#fig.savefig('grid.png', dpi=300)
         
 # In[]
         
-defaultDict = default_landscape_parameters()
-new_landscape_parameter['landscape']['km'] = 0.1      
+#defaultDict = default_landscape_parameters()
+#new_landscape_parameter['landscape']['km'] = 0.1      
 
 # In[]
-new_landscape_parameter = default_landscape_parameters()
-new_landscape_parameter['landscape']['km'] = 0.01
-new_landscape_parameter['landscape']['ko'] = 0.005
-new_landscape_parameter['duration']['shear_start'] = 10000
-new_landscape_parameter['duration']['total_time'] = 11000
-new_landscape_parameter['save_opt']['save_out'] = 'temp'
-#new_landscape_parameter['model_domain']['Nxy'] = 50 
-new_landscape_parameter['fault_opt']['localization'] = 0.1     
-run_model(new_landscape_parameter)
+#new_landscape_parameter = default_landscape_parameters()
+#new_landscape_parameter['landscape']['km'] = 0.05
+#new_landscape_parameter['landscape']['ko'] = 0.005
+#new_landscape_parameter['landscape']['Do'] = 5
+#new_landscape_parameter['landscape']['Dm'] = 5 # 50 * 10^-4 m^2/yr as per Estimation of the diffusion coefficient from slopeconvexity at Marin County, California
+#new_landscape_parameter['duration']['shear_start'] = 5000
+#new_landscape_parameter['duration']['total_time'] = 6000
+#new_landscape_parameter['save_opt']['save_out'] = True
+#new_landscape_parameter['save_opt']['save_ascii'] = True
+#new_landscape_parameter['model_domain']['Nxy'] = 160
+#new_landscape_parameter['model_domain']['xmax'] = 6000
+#new_landscape_parameter['model_domain']['ymax'] = 4000
+#new_landscape_parameter['fault_opt']['localization'] = 0.1     
+#rmg, ds = run_model(new_landscape_parameter)
 
 
 # In[] Quick and dirty runs
-new_landscape_parameter = default_landscape_parameters()
-new_landscape_parameter['fault_opt']['localization'] = 0.1   
-new_landscape_parameter['model_domain']['Nxy'] = 80
-new_landscape_parameter['duration']['shear_start'] = 1000
-new_landscape_parameter['duration']['total_time'] = 1300
-run_model(new_landscape_parameter)
+#new_landscape_parameter = default_landscape_parameters()
+#new_landscape_parameter['fault_opt']['localization'] = 0.1   
+#new_landscape_parameter['model_domain']['Nxy'] = 100
+#new_landscape_parameter['duration']['shear_start'] = 1000
+#new_landscape_parameter['duration']['total_time'] = 1300
+#new_landscape_parameter['save_opt']['save_ascii'] = True 
+#new_landscape_parameter['save_opt']['save_out'] = True
+#run_model(new_landscape_parameter)
                 
+# In[] Quick and dirty runs
+new_landscape_parameter = default_landscape_parameters()
+new_landscape_parameter['landscape']['km']          = 0.05
+new_landscape_parameter['landscape']['ko']          = 0.01
+new_landscape_parameter['fault_opt']['damage_prof'] = 'heaviside_down';
+new_landscape_parameter['fault_opt']['localization']= 0.1
+new_landscape_parameter['model_domain']['Nxy']      = 100
+new_landscape_parameter['duration']['shear_start']  = 5000
+new_landscape_parameter['duration']['total_time']   = 10000 
+new_landscape_parameter['save_opt']['save_out']     = 'temp'
+new_landscape_parameter['tectonics']['track_uplift'] = True
+rmg = run_model(new_landscape_parameter)
+    
