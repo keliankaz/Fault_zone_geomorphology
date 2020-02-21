@@ -61,7 +61,7 @@ import datetime
 import os
 
 from landlab.components import (LinearDiffuser, #Hillslopes
-                                FlowRouter, # Flow accumulation
+                                FlowAccumulator, # Flow accumulation
                                 FastscapeEroder, #river erosion
                                 DepressionFinderAndRouter, # lake filling
                                 Lithology) # Diffirent lithologies (damage zone)
@@ -251,11 +251,11 @@ def run_model(mdl_input = None):
             lith = Lithology(self.rmg,
                              self.rmg.ones().ravel().reshape(1,len(self.rmg.node_y)), # note that this is a dummy thickness
                              self.rmg.node_y.reshape(1,len(self.rmg.node_y)),
-                             attrs)
+                             attrs,
+                             rock_id = self.rmg.node_y)
 
             self.rmg['node']['topographic__elevation'] += 1.
-            dz_ad = 0.
-            lith.run_one_step(dz_advection = dz_ad, rock_id = self.rmg.node_y)
+            lith.run_one_step()
             #imshow_grid(self.rmg, 'K_sp', cmap='viridis', vmin=ko, vmax=km)
             return lith
 
@@ -273,7 +273,9 @@ def run_model(mdl_input = None):
     ## Next, we instantiate landlab components that will evolve the landscape #####
     ################################################################################
 
-    fr = FlowRouter(rmg)                                                # standard D8 flow routing algorithm
+    fr = FlowAccumulator(rmg,
+                         'topographic__elevation',
+                         flow_director='FlowDirectorD8')                                                # standard D8 flow routing algorithm
     sp = FastscapeEroder(rmg, K_sp='K_sp',m_sp=landscape['m'],n_sp=landscape['n'],threshold_sp=0) # river eroder
     lin_diffuse = LinearDiffuser(rmg, linear_diffusivity='D')           #linear diffuser
     fill = DepressionFinderAndRouter(rmg)                               #lake filling algorithm
