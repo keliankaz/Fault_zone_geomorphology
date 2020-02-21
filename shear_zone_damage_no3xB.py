@@ -46,28 +46,30 @@ Limited the size of the buffer to improve computation time
 ## First, we initialize the code by importing python libraries. ###############
 ################################################################################
 
-import numpy as np # numerical python
+import numpy as np                                          # numerical python
 import xarray as xr
-import matplotlib.pyplot as plt # matplotlib plotting functions
+import matplotlib.pyplot as plt                             # matplotlib plotting functions
 
 
-from landlab import RasterModelGrid #landlab raster grid
-from landlab.plot import imshow_grid #landlab plotting function
+from landlab import RasterModelGrid                         #landlab raster grid
+from landlab.plot import imshow_grid                        #landlab plotting function
 import holoviews as hv
 hv.notebook_extension('matplotlib')
 
-import dill # to save the workspace variables for reproducibility
+import dill                                                 # to save the workspace variables for reproducibility
 import datetime
 import os
 
-from landlab.components import (LinearDiffuser, #Hillslopes
-                                FlowAccumulator, # Flow accumulation
-                                FastscapeEroder, #river erosion
-                                DepressionFinderAndRouter, # lake filling
-                                Lithology) # Diffirent lithologies (damage zone)
+from landlab.components import (LinearDiffuser,             #Hillslopes
+                                FlowAccumulator,            # Flow accumulation
+                                FastscapeEroder,            #river erosion
+                                DepressionFinderAndRouter,  # lake filling
+                                Lithology)                  # Diffirent lithologies (damage zone)
 
 from landlab.testing.tools import cdtemp
-from landlab.io.esri_ascii import write_esri_ascii # export to ascii (to analyse in matlab)
+from landlab.io.esri_ascii import write_esri_ascii          # export to ascii (to analyse in matlab)
+
+from tqdm import tqdm                                       # progress bar
 
 
 
@@ -309,7 +311,13 @@ def run_model(mdl_input = None):
     mean_elev   = []
     time_array  = []
     print('Growing landscape towards steady state...')
+
+    pbar = tqdm(total=duration['total_time'])
+    pbar.refresh()
+
     while (current_time <= duration['total_time']):
+        pbar.n = current_time
+        pbar.refresh()
 
         ## Looped boundary conditions ##
 
@@ -398,7 +406,7 @@ def run_model(mdl_input = None):
         ## Plotting ##
         # plot output at each [plot_num] iteration once we start lateral advection
         if i % plot_num == 0 and current_time>duration['shear_start']:
-          print('Current time = ' + str(current_time)) # show current time
+          
           if not save_opt['save_out'] == False:
               for of in out_fields:
                 ds[of][plotCounter,:,:] = rmg['node'][of].reshape(rmg.shape)
@@ -414,8 +422,6 @@ def run_model(mdl_input = None):
 #    plt.xlim((e1,e2))
 #    plt.show()
 #    plt.clf
-
-
 
     ###########################################################################
     ## plot the evolution of the mean elevation of the model:
@@ -540,7 +546,7 @@ new_landscape_parameter['landscape']['km']          = 0.05
 new_landscape_parameter['landscape']['ko']          = 0.01
 new_landscape_parameter['fault_opt']['damage_prof'] = 'heaviside_down';
 new_landscape_parameter['fault_opt']['localization']= 0.1
-new_landscape_parameter['model_domain']['Nxy']      = 100
+new_landscape_parameter['model_domain']['Nxy']      = 40
 new_landscape_parameter['duration']['shear_start']  = 5000
 new_landscape_parameter['duration']['total_time']   = 10000
 new_landscape_parameter['save_opt']['save_out']     = 'temp'
