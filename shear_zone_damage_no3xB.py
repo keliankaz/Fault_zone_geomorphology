@@ -56,7 +56,7 @@ from landlab.plot import imshow_grid                        #landlab plotting fu
 import holoviews as hv
 hv.notebook_extension('matplotlib')
 
-import dill                                                 # to save the workspace variables for reproducibility
+import pickle                                               # to save the workspace variables for reproducibility
 import datetime
 import os
 
@@ -114,9 +114,9 @@ def default_landscape_parameters():
                                'append_to_log': True}}         
     return mdl_dict
 
-################################################################################
-###########################  we now define the model ###########################
-################################################################################
+###############################################################################
+###########################  we now define the model ##########################
+###############################################################################
 
 def run_model(mdl_input = None):
     if mdl_input == None:
@@ -417,8 +417,8 @@ def run_model(mdl_input = None):
               plotCounter += 1
             current_time += dt # update time tracker
             i += 1 # update iteration variable
-        print('number of frames:', plotCounter)
-        print('For loop complete')
+    print('number of frames:', plotCounter)
+    print('For loop complete')
     
     
     ##########################################################################
@@ -433,7 +433,7 @@ def run_model(mdl_input = None):
 
     ##########################################################################
     ## plot the evolution of the mean elevation of the model:
-    if tectonics['track_uplift']:
+    if tectonics['track_uplift']==True:
         plt.figure()
         plt.plot(time_array,mean_elev, label='Mean elevation')
         plt.axvline(duration['shear_start'],color='r',label='Start lateral advection')
@@ -458,7 +458,8 @@ def run_model(mdl_input = None):
             topo = hvds_topo.to(hv.Image, ['x', 'y'])
             topo.opts(colorbar=True, fig_size=200, xlim=(e1, e2))
             hv.save(topo, os.path.join(dn,fn + of + '.gif'))
-        dill.dump_session(os.path.join(dn,fn + '.pkl'))
+        with open(os.path.join(dn,fn + '.pkl'), 'wb') as f:
+            pickle.dump([rmg,ds],f)
         # and to load the session again:
         # dill.load_session(filename)
     if save_opt['save_ascii'] == True:
@@ -477,9 +478,6 @@ def run_model(mdl_input = None):
         with open('Model_log.csv', mode='a') as fd:
             writer = csv.writer(fd)            
             writer.writerow(NestedDictValues(mdl_input))
-                
-            
-        
     return rmg
 
 ################################################################################
@@ -494,60 +492,64 @@ def run_model(mdl_input = None):
 
 # with the code in the format you can easily play around with different input stuctures:
 
-koAry = [0.005,    0.0075,   0.01]
-locAry= [1/10**10, 1/10**2,1/10]
-defaultDict = default_landscape_parameters()
-defaultDict['duration']['shear_start'] = 4000
-defaultDict['duration']['total_time'] = 5000
-defaultDict['model_domain']['Nxy'] = 140
-defaultDict['save_opt']['save_out'] = False
+# koAry = [0.005,    0.0075,   0.01]
+# locAry= [1/10**10, 1/10**2,1/10]
+# defaultDict = default_landscape_parameters()
+# defaultDict['duration']['shear_start'] = 4000
+# defaultDict['duration']['total_time'] = 5000
+# defaultDict['model_domain']['Nxy'] = 100
+# defaultDict['save_opt']['save_out'] = False
 
-def plot_matrix(defaultDict,koAry,locAry,plot_field):
-    # Illuminate the scene from the northwest
-    rmg_arr = []
-    for idxDam, iDamage in enumerate(koAry):
-        for idxDef, iDef in enumerate(locAry):
-            new_landscape_parameter = defaultDict
-            new_landscape_parameter['landscape']['ko'] = iDamage
-            new_landscape_parameter['fault_opt']['localization'] = iDef
-            rmg = run_model(mdl_input = new_landscape_parameter)
-            rmg_arr.append(rmg)
+# def plot_matrix(defaultDict,koAry,locAry,plot_field):
+#     # Illuminate the scene from the northwest
+#     rmg_arr = []
+#     for idxDam, iDamage in enumerate(koAry):
+#         for idxDef, iDef in enumerate(locAry):
+#             new_landscape_parameter = defaultDict
+#             new_landscape_parameter['landscape']['ko'] = iDamage
+#             new_landscape_parameter['fault_opt']['localization'] = iDef
+#             rmg = run_model(mdl_input = new_landscape_parameter)
+#             rmg_arr.append(rmg)
     
-    for iField in plot_field:
-        fig, ax = plt.subplots(len(koAry),len(locAry),figsize=[6,4.5])
-        plot_count = 0
-        for idxDam, iDamage in enumerate(koAry):
-            for idxDef, iDef in enumerate(locAry):
-                irmg      = rmg_arr[plot_count]; plot_count+=1
-                topo_elev = irmg.node_vector_to_raster(irmg['node'][iField], True)
-                ax[idxDam,idxDef].imshow(topo_elev)
-                Nx = topo_elev.shape[1]
-                buff = new_landscape_parameter['model_domain']['loopBuff']
-                Nbuff = Nx*buff/(1+2*buff)
-                ax[idxDam,idxDef,].set_xlim(Nbuff, Nx - Nbuff)
-                if idxDam == 0:
-                    tle = '${localization:.2e}$'.format(localization = iDef)
-                    ax[idxDam,idxDef].title.set_text(tle)
+#     for iField in plot_field:
+#         fig, ax = plt.subplots(len(koAry),len(locAry),figsize=[6,4.5])
+#         plot_count = 0
+#         for idxDam, iDamage in enumerate(koAry):
+#             for idxDef, iDef in enumerate(locAry):
+#                 irmg      = rmg_arr[plot_count]; plot_count+=1
+#                 topo_elev = irmg.node_vector_to_raster(irmg['node'][iField], True)
+#                 ax[idxDam,idxDef].imshow(topo_elev)
+#                 Nx = topo_elev.shape[1]
+#                 buff = new_landscape_parameter['model_domain']['loopBuff']
+#                 Nbuff = Nx*buff/(1+2*buff)
+#                 ax[idxDam,idxDef,].set_xlim(Nbuff, Nx - Nbuff)
+#                 if idxDam == 0:
+#                     tle = '${localization:.2e}$'.format(localization = iDef)
+#                     ax[idxDam,idxDef].title.set_text(tle)
         
-                if idxDef == 0:
-                    tle = '${damage:.2e}$'.format(damage = iDamage)
-                    ax[idxDam,idxDef].set_ylabel(tle)
+#                 if idxDef == 0:
+#                     tle = '${damage:.2e}$'.format(damage = iDamage)
+#                     ax[idxDam,idxDef].set_ylabel(tle)
         
-        for iax in ax.flat:
-            iax.set_xticks([])
-            iax.set_yticks([])
+#         for iax in ax.flat:
+#             iax.set_xticks([])
+#             iax.set_yticks([])
         
         
-        fig
-        fig.savefig('grid.png', dpi=300)
+#         fig
+#         fig.savefig('grid.png', dpi=300)
         
-plot_matrix(defaultDict,koAry,locAry,['topographic__elevation','drainage_area'])
+# plot_matrix(defaultDict,koAry,locAry,['topographic__elevation','drainage_area'])
 
 
 # In[]
 
-#defaultDict = default_landscape_parameters()
-#new_landscape_parameter['landscape']['km'] = 0.1
+new_landscape_parameter = default_landscape_parameters()
+new_landscape_parameter['duration']['shear_start']  = 2000
+new_landscape_parameter['duration']['total_time']   = 3000
+new_landscape_parameter['model_domain']['Nxy']  = 80
+new_landscape_parameter['save_opt']['save_out'] = True
+run_model(new_landscape_parameter)
 
 # In[]
 #new_landscape_parameter = default_landscape_parameters()
