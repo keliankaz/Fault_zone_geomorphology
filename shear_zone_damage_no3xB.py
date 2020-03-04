@@ -71,6 +71,8 @@ from landlab.io.esri_ascii import write_esri_ascii          # export to ascii (t
 
 from tqdm import tqdm                                       # progress bar
 
+import csv                                                  # to record model log
+
 
 
 # In[]
@@ -108,7 +110,8 @@ def default_landscape_parameters():
                                'save_format':   'Default',        # alt: a dict with 'Directory' and 'Filename' keys
                                'save_ascii':    False,
                                'out_fields':    ['topographic__elevation',
-                                                 'drainage_area']}}         
+                                                 'drainage_area'], 
+                               'append_to_log': True}}         
     return mdl_dict
 
 ################################################################################
@@ -464,7 +467,18 @@ def run_model(mdl_input = None):
     if save_opt['save_out'] == 'temp':
         hv.save(topo,'temp_output.gif')
         
-     
+    if save_opt['append_to_log'] == True:
+        def NestedDictValues(d):
+            for v in d.values():
+                if isinstance(v, dict):
+                    yield from NestedDictValues(v)
+                else:
+                    yield v
+        with open('Model_log.csv', mode='a') as fd:
+            writer = csv.writer(fd)            
+            writer.writerow(NestedDictValues(mdl_input))
+                
+            
         
     return rmg
 
@@ -480,32 +494,29 @@ def run_model(mdl_input = None):
 
 # with the code in the format you can easily play around with different input stuctures:
 
-kmAry = [0.005,    0.01,   0.05]
+koAry = [0.005,    0.0075,   0.01]
 locAry= [1/10**10, 1/10**2,1/10]
 defaultDict = default_landscape_parameters()
 defaultDict['duration']['shear_start'] = 4000
 defaultDict['duration']['total_time'] = 5000
-defaultDict['model_domain']['Nxy'] = 100
+defaultDict['model_domain']['Nxy'] = 140
 defaultDict['save_opt']['save_out'] = False
 
-defaultDict['fault_opt']['damage_prof'] = 'heaviside_down';
-
-
-def plot_matrix(defaultDict,kmAry,locAry,plot_field):
+def plot_matrix(defaultDict,koAry,locAry,plot_field):
     # Illuminate the scene from the northwest
     rmg_arr = []
-    for idxDam, iDamage in enumerate(kmAry):
+    for idxDam, iDamage in enumerate(koAry):
         for idxDef, iDef in enumerate(locAry):
             new_landscape_parameter = defaultDict
-            new_landscape_parameter['landscape']['km'] = iDamage
+            new_landscape_parameter['landscape']['ko'] = iDamage
             new_landscape_parameter['fault_opt']['localization'] = iDef
             rmg = run_model(mdl_input = new_landscape_parameter)
             rmg_arr.append(rmg)
     
     for iField in plot_field:
-        fig, ax = plt.subplots(len(kmAry),len(locAry),figsize=[6,4.5])
+        fig, ax = plt.subplots(len(koAry),len(locAry),figsize=[6,4.5])
         plot_count = 0
-        for idxDam, iDamage in enumerate(kmAry):
+        for idxDam, iDamage in enumerate(koAry):
             for idxDef, iDef in enumerate(locAry):
                 irmg      = rmg_arr[plot_count]; plot_count+=1
                 topo_elev = irmg.node_vector_to_raster(irmg['node'][iField], True)
@@ -529,8 +540,8 @@ def plot_matrix(defaultDict,kmAry,locAry,plot_field):
         
         fig
         fig.savefig('grid.png', dpi=300)
-    
-plot_matrix(defaultDict,kmAry,locAry,['topographic__elevation','drainage_area'])
+        
+plot_matrix(defaultDict,koAry,locAry,['topographic__elevation','drainage_area'])
 
 
 # In[]
